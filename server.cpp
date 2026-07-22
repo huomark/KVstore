@@ -1,5 +1,6 @@
 #include<bits/stdc++.h>
 #include <arpa/inet.h>
+#include <netinet/in.h>
 #include <sys/socket.h>
 
 constexpr int port = 8080;
@@ -22,11 +23,27 @@ int main(){
         perror("set sock reuse addr");
         return 0;
     }
+    
+    struct sockaddr_in q;
+    q.sin_family = AF_INET;
+    q.sin_port = htons(8080);
+    q.sin_addr.s_addr = inet_addr("0.0.0.0");
 
-    sockaddr_in server_address{};
-    server_address.sin_family = AF_INET;
-    server_address.sin_port = htons(port);
-    server_address.sin_addr.s_addr = htonl(INADDR_ANY);
+
+
+    if(bind(sockfd, (struct sockaddr*)&q, sizeof(q)) == -1){
+        perror("bind");
+        return 0;
+    }
+    if(listen(sockfd, 100) == -1){
+        perror("listen");
+        return 0;
+    }
+    
+    while(1){
+        int client_fd = accept(sockfd, (struct sockaddr*)&q, sizeof(q));
+    
+    }
     // server_address.sin_addr.s_addr = 0;
 
     
