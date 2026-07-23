@@ -24,7 +24,7 @@ int main(){
         return 0;
     }
     
-    struct sockaddr_in q;
+    struct sockaddr_in q{};
     q.sin_family = AF_INET;
     q.sin_port = htons(8080);
     q.sin_addr.s_addr = inet_addr("0.0.0.0");
@@ -40,12 +40,22 @@ int main(){
         return 0;
     }
     
+    char buffer[2048];
+    int client_fd = accept(sockfd, NULL, NULL);
+    if(client_fd==-1){
+        perror("accept");
+        return 0;
+    }
     while(1){
-        int client_fd = accept(sockfd, (struct sockaddr*)&q, sizeof(q));
-    
+        int gogo = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
+        if(gogo <= 0){
+            break;
+        }
+        buffer[gogo] = '\0';
+        std::cout<<"Recv: "<<buffer<<"\n";
+        int se = send(client_fd, buffer, gogo + 1, 0);
     }
     // server_address.sin_addr.s_addr = 0;
 
-    
 
 }
