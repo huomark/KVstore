@@ -19,6 +19,34 @@ bool check_valid_command(std::vector<std::string> now){
     return 0;
 }
 
+std::unordered_map<std::string, std::string>mp;
+
+std::string todo(std::vector<std::string> now){
+    std::string reply = "";
+    if(now[0] == "SET"){
+        mp[now[1]] = now[2];
+        reply = "SET successfully\n";
+    }
+    else if(now[0] == "GET"){
+        if(mp.count(now[1])){
+            reply = mp[now[1]];
+            reply += '\n';
+        }    
+        else
+            reply = "* KEY doesn't exist\n";
+    }
+    else if(now[0] == "DEL"){
+        if(mp.count(now[1])){
+            mp.erase(now[1]);
+            reply = "DEL successfully\n";
+        }    
+        else
+            reply = "* KEY doesn't exist\n";
+    }
+    return reply;
+    
+}
+
 std::vector<std::string> receive_all(int client_fd){
     int now = 0;
     std::vector<std::string> all_get;
@@ -116,7 +144,7 @@ int main(){
             bool ok = check_valid_command(pC);
             std::string rep = "fail\n";
             if(ok) {
-                rep = "ok\n";
+                rep = todo(pC);
             }
             int se = send(client_fd, rep.data(), rep.size(), 0);
         }
