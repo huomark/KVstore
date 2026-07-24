@@ -9,13 +9,10 @@ char buf[2048];
 char buffer[2048];
 
 void send_all(int fd, std::string a){
-    // std::serr<<
     a += '\n';
     int gg = 0;
     while(gg<a.size()){
-        // std::cerr<<gg<<"\n";
-        std::string b = a.substr(gg);
-        int len = send(fd, b.data(), b.size(), 0);
+        int len = send(fd, a.data()+gg, a.size()-gg, 0);
         gg += len;
     }
 }

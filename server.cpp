@@ -93,6 +93,14 @@ std::vector<std::string> parseCommand(std::string raw){
 
     return xd;
 }
+void send_all(int fd, std::string a){
+    a += '\n';
+    int gg = 0;
+    while(gg<a.size()){
+        int len = send(fd, a.data()+gg, a.size()-gg, 0);
+        gg += len;
+    }
+}
 
 int main(){
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -146,7 +154,7 @@ int main(){
             if(ok) {
                 rep = todo(pC);
             }
-            int se = send(client_fd, rep.data(), rep.size(), 0);
+            int se = send_all(client_fd, rep);
         }
         // std::cout<<"Recv: "<<buffer<<"\n";
     }
