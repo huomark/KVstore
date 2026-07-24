@@ -7,6 +7,18 @@ constexpr int port = 8080;
 
 char buf[2048];
 char buffer[2048];
+
+void send_all(int fd, std::string a){
+    // std::serr<<
+    a += '\n';
+    int gg = 0;
+    while(gg<a.size()){
+        // std::cerr<<gg<<"\n";
+        std::string b = a.substr(gg);
+        int len = send(fd, b.data(), b.size(), 0);
+        gg += len;
+    }
+}
 int main(){
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) {
@@ -39,7 +51,7 @@ int main(){
     while(1){
         std::string a;
         std::getline(std::cin, a);
-        send(sockfd, a.data(), a.size(), 0);
+        send_all(sockfd, a);
         int gogo = recv(sockfd, buffer, sizeof(buffer) - 1, 0);
         if(gogo == -1){
             perror("recv");
