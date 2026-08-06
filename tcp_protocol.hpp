@@ -1,5 +1,5 @@
 char buffer[2048];
-static void send_all(int fd, std::string a){
+void send_all(int fd, std::string a){
     a += '\n';
     int gg = 0;
     while(gg<a.size()){
@@ -8,7 +8,7 @@ static void send_all(int fd, std::string a){
     }
 }
 
-static std::vector<std::string> receive_all(int client_fd){
+std::vector<std::string> receive_all(int client_fd){
     int now = 0;
     std::vector<std::string> all_get;
     while(1){
