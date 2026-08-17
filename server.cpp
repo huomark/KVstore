@@ -67,6 +67,7 @@ std::vector<std::string> parseCommand(std::string raw){
     return xd;
 }
 
+epoll_event events[10005];
 int main(){
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) {
@@ -107,29 +108,45 @@ int main(){
         perror("listen");
         return 0;
     }
-    // epoll_ctl(epo, EPOLL_CTL_ADD, sockfd, /*event*/)
-    
-    
-    int client_fd = accept(sockfd, NULL, NULL);
-    if(client_fd==-1){
-        perror("accept");
-        return 0;
+
+    {
+        epoll_event server_ev{};
+        server_ev.events = EPOLLIN;
+        server_ev.data.fd = sockfd;
+        if(epoll_ctl(epo, EPOLL_CTL_ADD, sockfd, &server_ev) == -1){
+            perror("epoll add server");
+            exit(0);
+        }
     }
+    
     while(1){
-        auto gogo = receive_all(client_fd);
-        if(gogo.size() == 0){
-            break;
-        }
-        for(auto all_com: gogo){
-            auto pC = parseCommand(all_com);
-            bool ok = check_valid_command(pC);
-            std::string rep = "fail\n";
-            if(ok) {
-                rep = todo(pC);
+        int n = epoll_wait(epo, events, 10005, -1);
+        for(int i = 0; i < n; i++){
+            int now_fd = events[i].data.fd;
+            if(now_fd == sockfd){
+                int client_sock = accept(sockfd, NULL, NULL);
+                epoll_event client_ep{};
+                client_ep.events = EPOLLIN;
+                client_ep.data.fd = client_sock;
+                epoll_ctl(epo, EPOLL_CTL_ADD, client_sock, &client_ep);
             }
-            send_all(client_fd, rep);
+            else{
+                auto gogo = receive_all(now_fd);
+                if(gogo.size() == 0){
+                    continue;
+                }
+                for(auto all_com: gogo){
+                    auto pC = parseCommand(all_com);
+                    bool ok = check_valid_command(pC);
+                    std::string rep = "fail\n";
+                    if(ok) {
+                        rep = todo(pC);
+                    }
+                    send_all(now_fd, rep);
+                }
+                std::cout<<"Recv: "<<buffer<<"\n";
+            }
         }
-        std::cout<<"Recv: "<<buffer<<"\n";
     }
     // server_address.sin_addr.s_addr = 0;
 
