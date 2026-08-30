@@ -3,9 +3,16 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/epoll.h>
+#include <fcntl.h>
 #include "tcp_protocol.hpp"
 
 constexpr int port = 8080;
+
+void set_nonblock(int &fd){
+    int ori_flag = fcntl(fd, F_GETFL, 0);
+    ori_flag |= O_NONBLOCK;
+    fcntl(fd, F_SETFL, ori_flag);
+}
 
 bool check_valid_command(std::vector<std::string> now){
     if(now[0] == "SET"){
@@ -67,7 +74,9 @@ std::vector<std::string> parseCommand(std::string raw){
     return xd;
 }
 
-epoll_event events[10005];
+const int EVENT_NUM = 12005;
+epoll_event events[EVENT_NUM];
+std::string left_command[EVENT_NUM];
 int main(){
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) {
@@ -120,21 +129,30 @@ int main(){
     }
     
     while(1){
-        int n = epoll_wait(epo, events, 10005, -1);
+        int n = epoll_wait(epo, events, EVENT_NUM, -1);
         for(int i = 0; i < n; i++){
             int now_fd = events[i].data.fd;
             if(now_fd == sockfd){
                 int client_sock = accept(sockfd, NULL, NULL);
+                if(client_sock == -1) continue;
+                set_nonblock(client_sock);
                 epoll_event client_ep{};
+                left_command[client_sock] = "";
                 client_ep.events = EPOLLIN;
                 client_ep.data.fd = client_sock;
                 epoll_ctl(epo, EPOLL_CTL_ADD, client_sock, &client_ep);
             }
             else{
-                auto gogo = receive_all(now_fd);
-                if(gogo.size() == 0){
-                    continue;
+                std::string now = left_command[now_fd];
+                auto pp = receive_all(now_fd, now);
+                auto gogo = pp.first;
+                bool online = pp.second;
+                if(gogo.size() && gogo.back()[gogo.back().size()-1] != '\n'){
+                    auto bk = gogo.back();
+                    left_command[now_fd] = bk;
+                    gogo.pop_back();
                 }
+                else left_command[now_fd] = "";
                 for(auto all_com: gogo){
                     auto pC = parseCommand(all_com);
                     bool ok = check_valid_command(pC);
@@ -142,9 +160,15 @@ int main(){
                     if(ok) {
                         rep = todo(pC);
                     }
-                    send_all(now_fd, rep);
+                    bool on = send_all(now_fd, rep);
+                    if(!on) online = 0;
                 }
-                std::cout<<"Recv: "<<buffer<<"\n";
+                if(online == 0){
+                    left_command[now_fd] = "";
+                    epoll_ctl(epo, EPOLL_CTL_DEL, now_fd, nullptr);
+                    close(now_fd);
+                    continue;
+                }
             }
         }
     }
