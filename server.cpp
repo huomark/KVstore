@@ -77,6 +77,8 @@ std::vector<std::string> parseCommand(std::string raw){
 const int EVENT_NUM = 12005;
 epoll_event events[EVENT_NUM];
 std::string left_command[EVENT_NUM];
+std::string wait_reply[EVENT_NUM];
+bool can_remove[EVENT_NUM];
 int main(){
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) {
@@ -137,42 +139,74 @@ int main(){
                 if(client_sock == -1) continue;
                 set_nonblock(client_sock);
                 epoll_event client_ep{};
+
                 left_command[client_sock] = "";
+                wait_reply[client_sock] = "";
+                can_remove[client_sock] = 0;
+
                 client_ep.events = EPOLLIN;
                 client_ep.data.fd = client_sock;
                 epoll_ctl(epo, EPOLL_CTL_ADD, client_sock, &client_ep);
             }
             else{
-                std::string now = left_command[now_fd];
-                auto pp = receive_all(now_fd, now);
-                auto gogo = pp.first;
-                bool online = pp.second;
-                if(gogo.size() && gogo.back()[gogo.back().size()-1] != '\n'){
-                    auto bk = gogo.back();
-                    left_command[now_fd] = bk;
-                    gogo.pop_back();
-                }
-                else left_command[now_fd] = "";
-                for(auto all_com: gogo){
-                    auto pC = parseCommand(all_com);
-                    bool ok = check_valid_command(pC);
-                    std::string rep = "fail\n";
-                    if(ok) {
-                        rep = todo(pC);
+                bool online = 1;
+                if(events[i].events & EPOLLIN){
+                    std::string now = left_command[now_fd];
+                    auto pp = receive_all(now_fd, now);
+                    auto gogo = pp.first;
+                    if(pp.second == 0){
+                        can_remove[now_fd] = 1;
                     }
-                    bool on = send_all(now_fd, rep);
-                    if(!on) online = 0;
+                    if(gogo.size() && gogo.back()[gogo.back().size()-1] != '\n'){
+                        auto bk = gogo.back();
+                        left_command[now_fd] = bk;
+                        gogo.pop_back();
+                    }
+                    else left_command[now_fd] = "";
+                    for(auto all_com: gogo){
+                        auto pC = parseCommand(all_com);
+                        bool ok = check_valid_command(pC);
+                        std::string rep = "fail\n";
+                        if(ok) {
+                            rep = todo(pC);
+                        }
+                        wait_reply[now_fd] += rep;
+                    }
+                    epoll_event client_ep{};
+                    client_ep.events = EPOLLIN | EPOLLOUT;
+                    client_ep.data.fd = now_fd;
+                    epoll_ctl(epo, EPOLL_CTL_MOD, now_fd, &client_ep);
                 }
-                if(online == 0){
-                    left_command[now_fd] = "";
-                    epoll_ctl(epo, EPOLL_CTL_DEL, now_fd, nullptr);
-                    close(now_fd);
-                    continue;
+
+                if(events[i].events & EPOLLOUT){
+                    auto _ = send_all(now_fd, wait_reply[now_fd]);
+                    int on = _.second;
+                    if(!on) {
+                        left_command[now_fd] = "";
+                        epoll_ctl(epo, EPOLL_CTL_DEL, now_fd, nullptr);
+                        close(now_fd);
+                        continue;
+                    }
+                    else if(on == 2){
+                        wait_reply[now_fd] = _.first;
+                    }
+                    else{
+                        if(can_remove[now_fd]){
+                            left_command[now_fd] = "";
+                            epoll_ctl(epo, EPOLL_CTL_DEL, now_fd, nullptr);
+                            close(now_fd);
+                            continue;
+                        }
+                        epoll_event client_ep{};
+                        client_ep.events = EPOLLIN;
+                        client_ep.data.fd = now_fd;
+                        epoll_ctl(epo, EPOLL_CTL_MOD, now_fd, &client_ep);
+                        wait_reply[now_fd] = "";
+                    }
                 }
             }
         }
     }
     // server_address.sin_addr.s_addr = 0;
-
 
 }

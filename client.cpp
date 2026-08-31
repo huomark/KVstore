@@ -49,7 +49,6 @@ int main(){
         std::cout<<"You can: GET key, SET key, or DEL key\n";
         std::string a;
         std::getline(std::cin, a);
-        a+='\n';
         send_all(sockfd, a);
         int gogo = recv(sockfd, buffer, sizeof(buffer) - 1, 0);
         if(gogo == -1){
