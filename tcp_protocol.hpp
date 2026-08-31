@@ -1,15 +1,18 @@
-char buffer[2048];
-bool send_all(int fd, std::string a){
+char buffer[20048];
+std::pair<std::string, int> send_all(int fd, std::string a){
     int gg = 0;
     while(gg<a.size()){
         int len = send(fd, a.data()+gg, a.size()-gg, 0);
         if (len < 0){
-            // client disconnect.
-            return 0;
+            if(errno == EAGAIN){ // should use EPOLLOUT
+                return {a.substr(gg), 2};
+            }
+            else // client disconnect.
+                return {"", 0};
         }
         gg += len;
     }
-    return 1;
+    return {"", 1};
 }
 
 std::pair<std::vector<std::string>, bool> receive_all(int client_fd, std::string tmp){
@@ -28,6 +31,9 @@ std::pair<std::vector<std::string>, bool> receive_all(int client_fd, std::string
                     buffer[already_get] = '\0';
                     std::string ha = buffer;
                     all_get.push_back(tmp+ha);
+                    if(all_get.back().size()>1000){
+                        return {{}, 0};
+                    }
                     tmp="";
                 }
             }
@@ -38,6 +44,7 @@ std::pair<std::vector<std::string>, bool> receive_all(int client_fd, std::string
             break;
         }
         already_get += gogo;
+        // message too long
         while(already_get){
             buffer[already_get] = '\0';
             std::string ha = buffer;
@@ -51,6 +58,9 @@ std::pair<std::vector<std::string>, bool> receive_all(int client_fd, std::string
                 already_get = already_get - fs - 1;
             }
             else break;
+        }
+        if(tmp.size() + already_get > 1000){
+            return {{}, 0};
         }
     }
     return {all_get, ok};
