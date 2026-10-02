@@ -5,8 +5,16 @@
 #include <sys/epoll.h>
 #include <fcntl.h>
 #include "tcp_protocol.hpp"
+#include "hash_map.hpp"
 
 constexpr int port = 8080;
+
+const int EVENT_NUM = 12005;
+struct Connection{
+    std::string left_command, wait_reply;
+    bool can_remove;
+};
+std::vector<Connection> connections(EVENT_NUM); 
 
 void set_nonblock(int &fd){
     int ori_flag = fcntl(fd, F_GETFL, 0);
@@ -14,71 +22,9 @@ void set_nonblock(int &fd){
     fcntl(fd, F_SETFL, ori_flag);
 }
 
-bool check_valid_command(std::vector<std::string> now){
-    if(now[0] == "SET"){
-        if(now.size()==3) return 1;
-    }
-    else if(now[0] == "GET"){
-        if(now.size()==2) return 1;
-    }
-    else if(now[0] == "DEL")
-        if(now.size()==2) return 1;
-    return 0;
-}
 
-std::unordered_map<std::string, std::string>mp;
-
-std::string todo(std::vector<std::string> now){
-    std::string reply = "";
-    if(now[0] == "SET"){
-        mp[now[1]] = now[2];
-        reply = "SET successfully\n";
-    }
-    else if(now[0] == "GET"){
-        if(mp.count(now[1])){
-            reply = mp[now[1]];
-            reply += '\n';
-        }    
-        else
-            reply = "* KEY doesn't exist\n";
-    }
-    else if(now[0] == "DEL"){
-        if(mp.count(now[1])){
-            mp.erase(now[1]);
-            reply = "DEL successfully\n";
-        }    
-        else
-            reply = "* KEY doesn't exist\n";
-    }
-    return reply;
-    
-}
-
-std::vector<std::string> parseCommand(std::string raw){
-    std::vector<std::string>xd;
-    std::string now;
-    for(auto tt: raw){
-        if(tt==' '){
-            xd.push_back(now);
-            now="";
-        }
-        else if(tt=='\n') {
-            xd.push_back(now);
-            break;
-        }
-        else{
-            now+=tt;
-        }
-    }
-
-    return xd;
-}
-
-const int EVENT_NUM = 12005;
 epoll_event events[EVENT_NUM];
-std::string left_command[EVENT_NUM];
-std::string wait_reply[EVENT_NUM];
-bool can_remove[EVENT_NUM];
+constexpr int WAIT_LIMIT = 6500;
 int main(){
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) {
@@ -130,6 +76,55 @@ int main(){
         }
     }
     
+    auto kick_user = [&](int now_fd){
+        connections[now_fd].wait_reply = "";
+        connections[now_fd].left_command = "";
+        connections[now_fd].can_remove = 0;
+        epoll_ctl(epo, EPOLL_CTL_DEL, now_fd, nullptr);
+        close(now_fd);
+    };
+    auto add_new_user = [&](int now_fd){
+        epoll_event client_ep{};
+        set_nonblock(now_fd);
+        connections[now_fd].wait_reply = "";
+        connections[now_fd].left_command = "";
+        connections[now_fd].can_remove = 0;
+        client_ep.events = EPOLLIN;
+        client_ep.data.fd = now_fd;
+        epoll_ctl(epo, EPOLL_CTL_ADD, now_fd, &client_ep);
+    };
+
+    auto epoll_mod = [&](int now_fd, int event){
+        epoll_event client_ep{};
+        client_ep.events = event;
+        client_ep.data.fd = now_fd;
+        epoll_ctl(epo, EPOLL_CTL_MOD, now_fd, &client_ep);
+    };
+
+    auto try_to_send_reply_to_client = [&](int now_fd){
+        auto _ = send_all(now_fd, connections[now_fd].wait_reply);
+            int on = _.second;
+        if(!on) {
+            kick_user(now_fd);
+        }
+        else if(on == 2){
+            connections[now_fd].wait_reply = _.first;
+            if(connections[now_fd].wait_reply.size() > WAIT_LIMIT){
+                kick_user(now_fd);
+                return;
+            }
+            epoll_mod(now_fd, EPOLLIN | EPOLLOUT);
+        }
+        else{
+            if(connections[now_fd].can_remove){
+                kick_user(now_fd);
+                return;
+            }
+            epoll_mod(now_fd, EPOLLIN);
+            connections[now_fd].wait_reply = "";
+        }
+    };
+
     while(1){
         int n = epoll_wait(epo, events, EVENT_NUM, -1);
         for(int i = 0; i < n; i++){
@@ -137,72 +132,34 @@ int main(){
             if(now_fd == sockfd){
                 int client_sock = accept(sockfd, NULL, NULL);
                 if(client_sock == -1) continue;
-                set_nonblock(client_sock);
-                epoll_event client_ep{};
-
-                left_command[client_sock] = "";
-                wait_reply[client_sock] = "";
-                can_remove[client_sock] = 0;
-
-                client_ep.events = EPOLLIN;
-                client_ep.data.fd = client_sock;
-                epoll_ctl(epo, EPOLL_CTL_ADD, client_sock, &client_ep);
+                add_new_user(client_sock);
             }
             else{
                 bool online = 1;
                 if(events[i].events & EPOLLIN){
-                    std::string now = left_command[now_fd];
-                    auto pp = receive_all(now_fd, now);
-                    auto gogo = pp.first;
-                    if(pp.second == 0){
-                        can_remove[now_fd] = 1;
+                    std::string now = connections[now_fd].left_command;
+                    auto [receive, online] = receive_all(now_fd, now);
+                    if(online == 0){
+                        connections[now_fd].can_remove = 1;
                     }
-                    if(gogo.size() && gogo.back()[gogo.back().size()-1] != '\n'){
-                        auto bk = gogo.back();
-                        left_command[now_fd] = bk;
-                        gogo.pop_back();
+                    if(receive.size() && receive.back()[receive.back().size()-1] != '\n'){
+                        connections[now_fd].left_command = receive.back();;
+                        receive.pop_back();
                     }
-                    else left_command[now_fd] = "";
-                    for(auto all_com: gogo){
+                    else connections[now_fd].left_command = "";
+                    for(auto all_com: receive){
                         auto pC = parseCommand(all_com);
-                        bool ok = check_valid_command(pC);
                         std::string rep = "fail\n";
-                        if(ok) {
+                        if(check_valid_command(pC)) {
                             rep = todo(pC);
                         }
-                        wait_reply[now_fd] += rep;
+                        connections[now_fd].wait_reply += rep;
                     }
-                    epoll_event client_ep{};
-                    client_ep.events = EPOLLIN | EPOLLOUT;
-                    client_ep.data.fd = now_fd;
-                    epoll_ctl(epo, EPOLL_CTL_MOD, now_fd, &client_ep);
+                    try_to_send_reply_to_client(now_fd);
                 }
 
                 if(events[i].events & EPOLLOUT){
-                    auto _ = send_all(now_fd, wait_reply[now_fd]);
-                    int on = _.second;
-                    if(!on) {
-                        left_command[now_fd] = "";
-                        epoll_ctl(epo, EPOLL_CTL_DEL, now_fd, nullptr);
-                        close(now_fd);
-                        continue;
-                    }
-                    else if(on == 2){
-                        wait_reply[now_fd] = _.first;
-                    }
-                    else{
-                        if(can_remove[now_fd]){
-                            left_command[now_fd] = "";
-                            epoll_ctl(epo, EPOLL_CTL_DEL, now_fd, nullptr);
-                            close(now_fd);
-                            continue;
-                        }
-                        epoll_event client_ep{};
-                        client_ep.events = EPOLLIN;
-                        client_ep.data.fd = now_fd;
-                        epoll_ctl(epo, EPOLL_CTL_MOD, now_fd, &client_ep);
-                        wait_reply[now_fd] = "";
-                    }
+                    try_to_send_reply_to_client(now_fd);
                 }
             }
         }
